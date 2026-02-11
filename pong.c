@@ -126,7 +126,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prev, LPSTR cmd, int show)
     rect_x = 100;
     rect_y = 100;
     int bx = 100, by = 100;
-    int px = 0, py = 0;
+    int px = 20, py = 0;
     int vx = 20, vy = 20;
     int pwidth =5, phiegth=100;
 
@@ -173,6 +173,7 @@ while (running)
     // Ball collision with paddle
     if (bx + 20 >= px && bx <= px + pwidth && by + 20 >= py && by <= py + phiegth) {
         vx = -vx;
+        
         // Optional: tweak vy depending on where it hits the paddle
     }
 
