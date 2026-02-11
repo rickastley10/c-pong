@@ -1,130 +1,163 @@
 #include <windows.h>
 
-#define WIN_WIDTH   640
-#define WIN_HEIGHT  480
+#define WIDTH 800
+#define HEIGHT 600
 
-#define PADDLE_W 10
-#define PADDLE_H 80
+#define PADDLE_WIDTH 10
+#define PADDLE_HEIGHT 80
 #define BALL_SIZE 10
 
-int py = 200;
-int ay = 200;
-int bx = 320;
-int by = 240;
-int vx = -5;
-int vy = 4;
+#define TIMER_ID 1
+#define TIMER_INTERVAL 16  // ~60 FPS
 
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    HDC hdc;
-    PAINTSTRUCT ps;
-    RECT r;
+// Game state
+int playerY = HEIGHT / 2 - PADDLE_HEIGHT / 2;
+int aiY = HEIGHT / 2 - PADDLE_HEIGHT / 2;
 
-    switch (msg) {
+int ballX = WIDTH / 2;
+int ballY = HEIGHT / 2;
+int ballVX = 5;
+int ballVY = 4;
+
+int upPressed = 0;
+int downPressed = 0;
+
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    case WM_CREATE:
+        SetTimer(hwnd, TIMER_ID, TIMER_INTERVAL, NULL);
+        return 0;
+
     case WM_KEYDOWN:
-        if (wParam == 'W' && py > 0)
-            py -= 10;
-        if (wParam == 'S' && py < WIN_HEIGHT - PADDLE_H)
-            py += 10;
-        if (wParam == VK_ESCAPE)
-            PostQuitMessage(0);
+        if (wParam == VK_UP) upPressed = 1;
+        if (wParam == VK_DOWN) downPressed = 1;
+        return 0;
+
+    case WM_KEYUP:
+        if (wParam == VK_UP) upPressed = 0;
+        if (wParam == VK_DOWN) downPressed = 0;
         return 0;
 
     case WM_TIMER:
-        /* ball movement */
-        bx += vx;
-        by += vy;
+        // Player movement
+        if (upPressed && playerY > 0)
+            playerY -= 6;
+        if (downPressed && playerY < HEIGHT - PADDLE_HEIGHT)
+            playerY += 6;
 
-        if (by <= 0 || by >= WIN_HEIGHT - BALL_SIZE)
-            vy = -vy;
+        // AI movement (very simple)
+        if (ballY > aiY + PADDLE_HEIGHT / 2)
+            aiY += 4;
+        else if (ballY < aiY + PADDLE_HEIGHT / 2)
+            aiY -= 4;
 
-        /* player paddle */
-        if (bx <= 20 &&
-            by + BALL_SIZE >= py &&
-            by <= py + PADDLE_H)
-            vx = -vx;
+        // Ball movement
+        ballX += ballVX;
+        ballY += ballVY;
 
-        /* AI paddle */
-        if (bx >= WIN_WIDTH - 30 &&
-            by + BALL_SIZE >= ay &&
-            by <= ay + PADDLE_H)
-            vx = -vx;
+        // Top/bottom collision
+        if (ballY <= 0 || ballY >= HEIGHT - BALL_SIZE)
+            ballVY = -ballVY;
 
-        /* scoring reset */
-        if (bx < 0 || bx > WIN_WIDTH) {
-            bx = WIN_WIDTH / 2;
-            by = WIN_HEIGHT / 2;
-            vx = -vx;
+        // Player paddle collision
+        if (ballX <= 20 &&
+            ballY + BALL_SIZE >= playerY &&
+            ballY <= playerY + PADDLE_HEIGHT)
+        {
+            ballVX = -ballVX;
         }
 
-        /* AI movement */
-        if (ay + PADDLE_H / 2 < by)
-            ay += 4;
-        else if (ay + PADDLE_H / 2 > by)
-            ay -= 4;
+        // AI paddle collision
+        if (ballX >= WIDTH - 30 &&
+            ballY + BALL_SIZE >= aiY &&
+            ballY <= aiY + PADDLE_HEIGHT)
+        {
+            ballVX = -ballVX;
+        }
+
+        // Reset if out of bounds
+        if (ballX < 0 || ballX > WIDTH)
+        {
+            ballX = WIDTH / 2;
+            ballY = HEIGHT / 2;
+        }
 
         InvalidateRect(hwnd, NULL, TRUE);
         return 0;
 
     case WM_PAINT:
-        hdc = BeginPaint(hwnd, &ps);
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
 
-        /* background */
-        GetClientRect(hwnd, &r);
-        FillRect(hdc, &r, (HBRUSH)(COLOR_WINDOW + 1));
+        // Clear background
+        HBRUSH bg = CreateSolidBrush(RGB(0, 0, 0));
+        FillRect(hdc, &ps.rcPaint, bg);
+        DeleteObject(bg);
 
-        /* paddles */
-        Rectangle(hdc, 10, py, 10 + PADDLE_W, py + PADDLE_H);
-        Rectangle(hdc, WIN_WIDTH - 20, ay,
-                         WIN_WIDTH - 20 + PADDLE_W, ay + PADDLE_H);
+        HBRUSH white = CreateSolidBrush(RGB(255, 255, 255));
+        SelectObject(hdc, white);
 
-        /* ball */
-        Ellipse(hdc, bx, by, bx + BALL_SIZE, by + BALL_SIZE);
+        // Player paddle
+        Rectangle(hdc, 10, playerY,
+                  10 + PADDLE_WIDTH, playerY + PADDLE_HEIGHT);
+
+        // AI paddle
+        Rectangle(hdc, WIDTH - 20, aiY,
+                  WIDTH - 20 + PADDLE_WIDTH, aiY + PADDLE_HEIGHT);
+
+        // Ball
+        Ellipse(hdc, ballX, ballY,
+                ballX + BALL_SIZE, ballY + BALL_SIZE);
+
+        DeleteObject(white);
 
         EndPaint(hwnd, &ps);
+    }
         return 0;
 
     case WM_DESTROY:
+        KillTimer(hwnd, TIMER_ID);
         PostQuitMessage(0);
         return 0;
     }
 
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev,
-                   LPSTR lpCmd, int nShow) {
-    WNDCLASS wc;
-    HWND hwnd;
-    MSG msg;
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
+                   LPSTR lpCmdLine, int nCmdShow)
+{
+    const char CLASS_NAME[] = "PongWindowClass";
 
-    wc.style = CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc = WndProc;
-    wc.cbClsExtra = 0;
-    wc.cbWndExtra = 0;
-    wc.hInstance = hInst;
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    WNDCLASS wc = {0};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = CLASS_NAME;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wc.lpszMenuName = NULL;
-    wc.lpszClassName = "PONG_WIN32";
 
     RegisterClass(&wc);
 
-    hwnd = CreateWindow(
-        "PONG_WIN32",
-        "Win32 Pong (TCC)",
+    HWND hwnd = CreateWindowEx(
+        0,
+        CLASS_NAME,
+        "Simple WinAPI Pong",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT,
-        WIN_WIDTH, WIN_HEIGHT,
-        NULL, NULL, hInst, NULL
+        WIDTH, HEIGHT,
+        NULL,
+        NULL,
+        hInstance,
+        NULL
     );
 
-    ShowWindow(hwnd, nShow);
-    UpdateWindow(hwnd);
+    ShowWindow(hwnd, nCmdShow);
 
-    SetTimer(hwnd, 1, 16, NULL); /* ~60 FPS */
-
-    while (GetMessage(&msg, NULL, 0, 0)) {
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0))
+    {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
