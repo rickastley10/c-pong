@@ -125,10 +125,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prev, LPSTR cmd, int show)
 
     rect_x = 100;
     rect_y = 100;
-    int bx = 0, by = 0;
+    int bx = 100, by = 100;
     int px = 0, py = 0;
     int vx = 20, vy = 20;
-    int pwidth =5, phiegth=20;
+    int pwidth =5, phiegth=100;
 
     /* ============================================================
    MAIN LOOP
@@ -177,9 +177,9 @@ while (running)
     }
 
     // Ball collision with walls
-    if (bx <= 0 || bx + 20 >= 500) vx = -vx;
+    if (bx + 20 >= 500) vx = -vx;
     if (by <= 0 || by + 20 >= 500) vy = -vy;
-
+    if (bx==0){bx=100;by=100;}
     /* Flip backbuffer */
     window_dc = GetDC(hwnd);
     BitBlt(window_dc, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, backbuffer_dc, 0, 0, SRCCOPY);
