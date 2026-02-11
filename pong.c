@@ -1,166 +1,193 @@
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <stdint.h>
 
-#define WIDTH 800
-#define HEIGHT 600
+/* ============================================================
+   CONFIG
+   ============================================================ */
+#define WINDOW_WIDTH  800
+#define WINDOW_HEIGHT 600
 
-#define PADDLE_WIDTH 10
-#define PADDLE_HEIGHT 80
-#define BALL_SIZE 10
+/* ============================================================
+   GLOBALS
+   ============================================================ */
+static HBITMAP backbuffer_bitmap;
+static HDC backbuffer_dc;
+static void* backbuffer_memory;
+static BITMAPINFO backbuffer_info;
+static int running = 1; /* 1 = running, 0 = exit */
 
-#define TIMER_ID 1
-#define TIMER_INTERVAL 16  // ~60 FPS
-
-// Game state
-int playerY = HEIGHT / 2 - PADDLE_HEIGHT / 2;
-int aiY = HEIGHT / 2 - PADDLE_HEIGHT / 2;
-
-int ballX = WIDTH / 2;
-int ballY = HEIGHT / 2;
-int ballVX = 5;
-int ballVY = 4;
-
-int upPressed = 0;
-int downPressed = 0;
-
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+/* ============================================================
+   RENDERER
+   ============================================================ */
+void clear_screen(uint32_t color)
 {
-    switch (uMsg)
+    int i;
+    uint32_t* pixel = (uint32_t*)backbuffer_memory;
+    for (i = 0; i < WINDOW_WIDTH * WINDOW_HEIGHT; i++)
+        pixel[i] = color;
+}
+
+void draw_rect(int x, int y, int w, int h, uint32_t color)
+{
+    int px, py, sx, sy;
+    for (py = 0; py < h; py++)
     {
-    case WM_CREATE:
-        SetTimer(hwnd, TIMER_ID, TIMER_INTERVAL, NULL);
-        return 0;
+        sy = y + py;
+        if (sy < 0 || sy >= WINDOW_HEIGHT) continue;
 
-    case WM_KEYDOWN:
-        if (wParam == VK_UP) upPressed = 1;
-        if (wParam == VK_DOWN) downPressed = 1;
-        return 0;
-
-    case WM_KEYUP:
-        if (wParam == VK_UP) upPressed = 0;
-        if (wParam == VK_DOWN) downPressed = 0;
-        return 0;
-
-    case WM_TIMER:
-        // Player movement
-        if (upPressed && playerY > 0)
-            playerY -= 6;
-        if (downPressed && playerY < HEIGHT - PADDLE_HEIGHT)
-            playerY += 6;
-
-        // AI movement (very simple)
-        if (ballY > aiY + PADDLE_HEIGHT / 2)
-            aiY += 4;
-        else if (ballY < aiY + PADDLE_HEIGHT / 2)
-            aiY -= 4;
-
-        // Ball movement
-        ballX += ballVX;
-        ballY += ballVY;
-
-        // Top/bottom collision
-        if (ballY <= 0 || ballY >= HEIGHT - BALL_SIZE)
-            ballVY = -ballVY;
-
-        // Player paddle collision
-        if (ballX <= 20 &&
-            ballY + BALL_SIZE >= playerY &&
-            ballY <= playerY + PADDLE_HEIGHT)
+        for (px = 0; px < w; px++)
         {
-            ballVX = -ballVX;
+            sx = x + px;
+            if (sx < 0 || sx >= WINDOW_WIDTH) continue;
+
+            ((uint32_t*)backbuffer_memory)[sy * WINDOW_WIDTH + sx] = color;
         }
-
-        // AI paddle collision
-        if (ballX >= WIDTH - 30 &&
-            ballY + BALL_SIZE >= aiY &&
-            ballY <= aiY + PADDLE_HEIGHT)
-        {
-            ballVX = -ballVX;
-        }
-
-        // Reset if out of bounds
-        if (ballX < 0 || ballX > WIDTH)
-        {
-            ballX = WIDTH / 2;
-            ballY = HEIGHT / 2;
-        }
-
-        InvalidateRect(hwnd, NULL, TRUE);
-        return 0;
-
-    case WM_PAINT:
-    {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps);
-
-        // Clear background
-        HBRUSH bg = CreateSolidBrush(RGB(0, 0, 0));
-        FillRect(hdc, &ps.rcPaint, bg);
-        DeleteObject(bg);
-
-        HBRUSH white = CreateSolidBrush(RGB(255, 255, 255));
-        SelectObject(hdc, white);
-
-        // Player paddle
-        Rectangle(hdc, 10, playerY,
-                  10 + PADDLE_WIDTH, playerY + PADDLE_HEIGHT);
-
-        // AI paddle
-        Rectangle(hdc, WIDTH - 20, aiY,
-                  WIDTH - 20 + PADDLE_WIDTH, aiY + PADDLE_HEIGHT);
-
-        // Ball
-        Ellipse(hdc, ballX, ballY,
-                ballX + BALL_SIZE, ballY + BALL_SIZE);
-
-        DeleteObject(white);
-
-        EndPaint(hwnd, &ps);
     }
-        return 0;
+}
 
-    case WM_DESTROY:
-        KillTimer(hwnd, TIMER_ID);
+/* ============================================================
+   WINDOW
+   ============================================================ */
+LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (msg == WM_CLOSE || msg == WM_DESTROY)
+    {
+        running = 0;
         PostQuitMessage(0);
         return 0;
     }
-
-    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-                   LPSTR lpCmdLine, int nCmdShow)
+/* ============================================================
+   BACKBUFFER
+   ============================================================ */
+void init_backbuffer(HWND hwnd)
 {
-    const char CLASS_NAME[] = "PongWindowClass";
+    HDC window_dc;
+    window_dc = GetDC(hwnd);
+    backbuffer_dc = CreateCompatibleDC(window_dc);
 
-    WNDCLASS wc = {0};
-    wc.lpfnWndProc = WindowProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = CLASS_NAME;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    /* Initialize bitmap info */
+    memset(&backbuffer_info, 0, sizeof(backbuffer_info));
+    backbuffer_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    backbuffer_info.bmiHeader.biWidth = WINDOW_WIDTH;
+    backbuffer_info.bmiHeader.biHeight = -WINDOW_HEIGHT; /* top-down */
+    backbuffer_info.bmiHeader.biPlanes = 1;
+    backbuffer_info.bmiHeader.biBitCount = 32;
+    backbuffer_info.bmiHeader.biCompression = BI_RGB;
 
-    RegisterClass(&wc);
-
-    HWND hwnd = CreateWindowEx(
-        0,
-        CLASS_NAME,
-        "Simple WinAPI Pong",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        WIDTH, HEIGHT,
+    backbuffer_bitmap = CreateDIBSection(
+        window_dc,
+        &backbuffer_info,
+        DIB_RGB_COLORS,
+        &backbuffer_memory,
         NULL,
-        NULL,
-        hInstance,
-        NULL
+        0
     );
 
-    ShowWindow(hwnd, nCmdShow);
+    SelectObject(backbuffer_dc, backbuffer_bitmap);
+    ReleaseDC(hwnd, window_dc);
+}
 
+/* ============================================================
+   MAIN LOOP
+   ============================================================ */
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prev, LPSTR cmd, int show)
+{
+    WNDCLASS wc;
+    HWND hwnd;
     MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0))
+    HDC window_dc;
+
+    int rect_x, rect_y;
+
+    /* Register window class */
+    memset(&wc, 0, sizeof(wc));
+    wc.lpfnWndProc = window_proc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = "Minimal2DEngine";
+    RegisterClass(&wc);
+
+    /* Create window */
+    hwnd = CreateWindowEx(
+        0,
+        wc.lpszClassName,
+        "Minimal 2D Engine",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        WINDOW_WIDTH, WINDOW_HEIGHT,
+        NULL, NULL, hInstance, NULL
+    );
+
+    init_backbuffer(hwnd);
+
+    rect_x = 100;
+    rect_y = 100;
+    int bx = 0, by = 0;
+    int px = 0, py = 0;
+    int vx = 20, vy = 20;
+    int pwidth =5, phiegth=20;
+
+    /* ============================================================
+   MAIN LOOP
+   ============================================================ */
+while (running)
+{
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
     {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+
+    // ===== PADDLE CONTROLS =====
+    if (GetAsyncKeyState('W') & 0x8000) {
+        py -= 10; // move up
+        if (py < 0) py = 0; // clamp to top
+    }
+    if (GetAsyncKeyState('S') & 0x8000) {
+        py += 10; // move down
+        if (py + phiegth > WINDOW_HEIGHT) py = WINDOW_HEIGHT - phiegth; // clamp to bottom
+    }
+
+    /* Example draw */
+    clear_screen(0xFFFFFFFF); /* white background */
+
+    /* draw borders */
+    draw_rect(0, 500, 500, 1, 0x00202020);
+    draw_rect(0, 0, 500, 1, 0x00202020);
+    draw_rect(0, 0, 1, 500, 0x00202020);
+    draw_rect(500, 0, 1, 500, 0x00202020);
+
+    /* draw ball */
+    draw_rect(bx, by, 20, 20, 0x00202020);
+
+    /* draw paddle */
+    draw_rect(px, py, pwidth, phiegth, 0x00202020);
+
+    // ===== BALL MOVEMENT =====
+    bx += vx;
+    by += vy;
+
+    // Ball collision with paddle
+    if (bx + 20 >= px && bx <= px + pwidth && by + 20 >= py && by <= py + phiegth) {
+        vx = -vx;
+        // Optional: tweak vy depending on where it hits the paddle
+    }
+
+    // Ball collision with walls
+    if (bx <= 0 || bx + 20 >= 500) vx = -vx;
+    if (by <= 0 || by + 20 >= 500) vy = -vy;
+
+    /* Flip backbuffer */
+    window_dc = GetDC(hwnd);
+    BitBlt(window_dc, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, backbuffer_dc, 0, 0, SRCCOPY);
+    ReleaseDC(hwnd, window_dc);
+
+    Sleep(16); // ~60 FPS
+}
+
 
     return 0;
 }
